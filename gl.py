@@ -9,6 +9,7 @@ from textura import Texture
 from mate import normal_fro, resta_lis, division_lis_fro, punto, baryCoords, cruz_lis, mult_M, multiplicacion_M
 import numpy as np
 from numpy import matrix, cos, sin, tan
+from shaders import *
 
 # para especificar cuanto tamaño quiero guardar en bytes de cada uno
 def char(c):
@@ -46,11 +47,13 @@ class Render(object):
         # alto de la imagen
         #self.alto = alto
         self.glCreateWindow(ancho, alto)
+        self.active_shader = None
+        self.active_texture = None
         # color predeterminado del punto en la pantalla
-        self.punto_color = negro
+        self.punto_color = blanco
         # luz
-        self.lightx=0
-        self.lighty=0
+        self.lightx=1
+        self.lighty=1
         self.lightz=1
         # camara
         self.createViewMatrix()
@@ -103,6 +106,15 @@ class Render(object):
         #             [0,0,0,1]]
 
         # self.viewMatrix = np.linalg.inv(camMatrix)
+
+    def getColor(self, tx, ty):
+        if tx >= 0 and tx <= 1 and ty >= 0 and ty <= 1:
+            x = int(tx * self.width)
+            y = int(ty * self.height)
+
+            return self.pixels[y][x]
+        else:
+            return color(0,0,0)
 
     def createProjectionMatrix(self, n = 0.1, f = 1000, fov = 60):
         t = tan((fov * np.pi / 180) / 2) * n
@@ -223,7 +235,6 @@ class Render(object):
         transVertex = (transVertex[0] / transVertex[3],
                          transVertex[1] / transVertex[3],
                          transVertex[2] / transVertex[3])
-        print(transVertex)
         return transVertex
 
 
@@ -373,7 +384,7 @@ class Render(object):
         imagen.close()
 
     # carga el modelo obj 
-    def loadModel(self, filename, translate, scale, texture = None, rotate=(1,1,0)):
+    def loadModel(self, filename, translate, scale, rotate=(1,1,0)):
         modelo = Obj(filename)
         modelMatrix = self.createObjectMatrix(translate, scale, rotate)
         rotationMatrix = self.createRotationMatrix(rotate)
@@ -423,7 +434,7 @@ class Render(object):
                 y3 = v3[1]
                 z3 = v3[2]
 
-            if texture:
+            if self.active_texture:
                 vt0 = modelo.texcoords[face[0][1] - 1]
                 vt1 = modelo.texcoords[face[1][1] - 1]
                 vt2 = modelo.texcoords[face[2][1] - 1]
@@ -457,19 +468,22 @@ class Render(object):
                 vn3 = modelo.normals[face[3][2] - 1]
                 vn3 = self.dirTransform(vn3, rotationMatrix)
 
-            self.triangle_bc(x0, x1, x2, y0, y1, y2, z0, z1, z2, vt0x, vt1x, vt2x, vt0y, vt1y, vt2y, texture = texture)
+            self.triangle_bc(x0, x1, x2, y0, y1, y2, z0, z1, z2, vt0x, vt1x, vt2x, vt0y, vt1y, vt2y, normals = (vn0,vn1,vn2))
             if vertCount > 3:
-                self.triangle_bc(x0, x2, x3, y0, y2, y3, z0, z2, z3, vt0x, vt2x, vt3x, vt0y, vt2y, vt3y, texture = texture)
+                self.triangle_bc(x0, x2, x3, y0, y2, y3, z0, z2, z3, vt0x, vt2x, vt3x, vt0y, vt2y, vt3y, normals = (vn0,vn1,vn2))
 
             # if vertCount > 3:
             #     self.triangle_bc(x0, x2, x3, y0, y2, y3, z0, z2, z3, vt0x, vt2x, vt3x, vt0y, vt2y, vt3y, texture = texture, intensity = intensity)           
             
     #Barycentric Coordinates
-    def triangle_bc(self, Ax, Bx, Cx, Ay, By, Cy, Az, Bz, Cz, tax, tbx, tcx, tay, tby, tcy, _color = rosado, texture = None):
+    def triangle_bc(self, Ax, Bx, Cx, Ay, By, Cy, Az, Bz, Cz, tax, tbx, tcx, tay, tby, tcy, normals = (),  _color = None):
         minx = round(min(Ax, Bx, Cx))
         miny = round(min(Ay, By, Cy))
         maxx = round(max(Ax, Bx, Cx))
         maxy = round(max(Ay, By, Cy))
+        A = (Ax, Ay, Az)
+        B = (Bx, By, Bz) 
+        C = (Cx, Cy, Cz)
 
         for x in range(minx, maxx + 1):
             for y in range(miny, maxy + 1):
@@ -480,21 +494,28 @@ class Render(object):
                 if u >= 0 and v >= 0 and w >= 0:
                     z = Az * u + Bz * v + Cz * w
                     if z > self.zbuffer[y][x]:
-                        b, g , r = _color 
-                        b /= 255
-                        g /= 255
-                        r /= 255
 
-                        if texture:
-                            tx = tax * u + tbx * v + tcx * w
-                            ty = tay * u + tby * v + tcy * w
+                        print("                                     pedo                        ")
+                        if self.active_shader:
+                            r, g, b = self.active_shader(
+                                self,
+                                verts = (Ax, Bx, Cx, Ay, By, Cy, Az, Bz, Cz),
+                                baryCoords = (u, v, w),
+                                texCoords = (tax, tbx, tcx, tay, tby, tcy),
+                                normals = normals,
+                                color = _color or self.punto_color)
+                            print("                                  PEL                       ")
+                            if self.active_texture:
+                                tx = tax * u + tbx * v + tcx * w
+                                ty = tay * u + tby * v + tcy * w
+                                texColor = self.active_texture.getColor(tx, ty)
+                                b *= texColor[0] / 255
+                                g *= texColor[1] / 255
+                                r *= texColor[2] / 255
+                        else:
+                            b, g, r = _color or self.punto_color
 
-                            texColor = texture.getColor(tx, ty)
-                            b *= texColor[0] / 255
-                            g *= texColor[1] / 255
-                            r *= texColor[2] / 255
-
-                        self.glVertex(x, y, texColor)
+                        self.glVertex(x, y, color(r,g,b))
                         self.zbuffer[y][x] = z
 
     # escribe el imagen
