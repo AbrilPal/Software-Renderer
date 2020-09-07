@@ -1,2 +1,2 @@
-# Software-Renderer
+# Static Rendering
 Proyecto No.1
